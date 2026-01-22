@@ -1,7 +1,10 @@
 {
+  "name": "thaliyogam-matrimony-api",
+  "private": true,
+  "type": "module",
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
-    "formidable": "^3.5.1",
-    "xlsx": "^0.18.5"
+    "@supabase/supabase-js": "^2.39.3",
+    "xlsx": "^0.18.5",
+    "formidable": "^3.5.1"
   }
 }
