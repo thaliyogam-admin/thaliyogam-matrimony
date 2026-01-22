@@ -1,6 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
 import XLSX from "xlsx";
 
+export const config = {
+  api: {
+    bodyParser: false
+  }
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "POST only" });
@@ -20,9 +26,7 @@ export default async function handler(req, res) {
 
     // Read raw binary body
     const chunks = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
+    for await (const chunk of req) chunks.push(chunk);
     const buffer = Buffer.concat(chunks);
 
     if (!buffer.length) {
@@ -40,7 +44,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Excel has no rows" });
     }
 
-    // Insert into leads table
+    // Insert into Supabase
     const { error } = await supabase
       .from("leads")
       .insert(rows);
