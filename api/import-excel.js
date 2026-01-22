@@ -1,61 +1,62 @@
-import formidable from "formidable";
-import fs from "fs";
-import xlsx from "xlsx";
 import { createClient } from "@supabase/supabase-js";
+import XLSX from "xlsx";
 
-export const config = {
-  api: {
-    bodyParser: false
-  }
-};
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
+/**
+ * POST /api/import-excel
+ * Body: raw binary (.xlsx)
+ */
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "POST only" });
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const form = formidable({ multiples: false });
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  form.parse(req, async (err, fields, files) => {
-    if (err) {
-      return res.status(500).json({ error: "Form parse error" });
-    }
-
-    const file = files.file;
-
-    if (!file) {
-      return res.status(400).json({ error: "Excel file missing (key must be 'file')" });
-    }
-
-    try {
-      const workbook = xlsx.readFile(file.filepath);
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = xlsx.utils.sheet_to_json(sheet);
-
-      if (!rows.length) {
-        return res.status(400).json({ error: "Excel empty" });
-      }
-
-      const { error } = await supabase
-        .from("leads")
-        .insert(rows);
-
-      if (error) {
-        return res.status(500).json({ error: error.message });
-      }
-
-      return res.status(200).json({
-        success: true,
-        inserted: rows.length
+    if (!supabaseUrl || !serviceKey) {
+      return res.status(500).json({
+        error: "Missing Supabase environment variables"
       });
-
-    } catch (e) {
-      return res.status(500).json({ error: e.message });
     }
-  });
+
+    const supabase = createClient(supabaseUrl, serviceKey);
+
+    // Read raw body
+    const buffers = [];
+    for await (const chunk of req) buffers.push(chunk);
+    const buffer = Buffer.concat(buffers);
+
+    // Parse Excel
+    const workbook = XLSX.read(buffer, { type: "buffer" });
+    const sheetName = workbook.SheetNames[0];
+    const rows = XLSX.utils.sheet_to_json(
+      workbook.Sheets[sheetName]
+    );
+
+    if (!rows.length) {
+      return res.status(400).json({ error: "Excel file is empty" });
+    }
+
+    // INSERT INTO leads table (change table name if needed)
+    const { error } = await supabase
+      .from("leads")
+      .insert(rows);
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    return res.json({
+      success: true,
+      inserted: rows.length
+    });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      error: "Import failed",
+      details: err.message
+    });
+  }
 }
