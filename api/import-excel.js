@@ -1,11 +1,12 @@
+import { createClient } from "@supabase/supabase-js";
 import formidable from "formidable";
 import fs from "fs";
 import xlsx from "xlsx";
-import { createClient } from "@supabase/supabase-js";
 
 /**
  * IMPORTANT:
- * Disable bodyParser so formidable can handle file upload
+ * Vercel Serverless does NOT support body parsing for file uploads.
+ * We must disable it explicitly.
  */
 export const config = {
   api: {
@@ -14,8 +15,8 @@ export const config = {
 };
 
 /**
- * Supabase Admin Client
- * (Uses Service Role Key – NEVER expose this in frontend)
+ * Supabase Admin Client (Service Role)
+ * NEVER expose this key on frontend
  */
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -23,15 +24,16 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
-  // Only allow POST
+  // Allow only POST
   if (req.method !== "POST") {
     return res.status(405).json({
       success: false,
-      message: "Method not allowed. Use POST.",
+      message: "Only POST requests are allowed",
     });
   }
 
   try {
+    // Parse multipart/form-data
     const form = formidable({
       multiples: false,
       keepExtensions: true,
@@ -44,9 +46,9 @@ export default async function handler(req, res) {
       });
     });
 
-    const file = files.file;
+    const excelFile = files.file;
 
-    if (!file) {
+    if (!excelFile) {
       return res.status(400).json({
         success: false,
         message: "Excel file is required (field name: file)",
@@ -54,7 +56,7 @@ export default async function handler(req, res) {
     }
 
     // Read Excel file
-    const workbook = xlsx.readFile(file.filepath);
+    const workbook = xlsx.readFile(excelFile.filepath);
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
 
@@ -68,7 +70,7 @@ export default async function handler(req, res) {
     }
 
     /**
-     * Example expected Excel columns:
+     * EXPECTED EXCEL COLUMNS (example)
      * name | phone | email | gender | dob
      * Adjust mapping as needed
      */
@@ -78,13 +80,17 @@ export default async function handler(req, res) {
       email: row.email || null,
       gender: row.gender || null,
       dob: row.dob || null,
-      source: "excel",
+      source: "excel_import",
+      created_at: new Date().toISOString(),
     }));
 
-    const { error } = await supabase.from("leads").insert(leads);
+    // Insert into Supabase
+    const { error } = await supabase
+      .from("leads")
+      .insert(leads);
 
     if (error) {
-      console.error("Supabase insert error:", error);
+      console.error("Supabase Insert Error:", error);
       return res.status(500).json({
         success: false,
         message: "Database insert failed",
@@ -92,13 +98,17 @@ export default async function handler(req, res) {
       });
     }
 
+    // Cleanup temp file
+    fs.unlinkSync(excelFile.filepath);
+
     return res.status(200).json({
       success: true,
       message: "Excel imported successfully",
-      count: leads.length,
+      inserted: leads.length,
     });
+
   } catch (err) {
-    console.error("Import error:", err);
+    console.error("Import Error:", err);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
