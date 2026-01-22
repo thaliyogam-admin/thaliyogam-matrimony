@@ -1,10 +1,12 @@
-import XLSX from "xlsx";
+import formidable from "formidable";
+import fs from "fs";
+import xlsx from "xlsx";
 import { createClient } from "@supabase/supabase-js";
 
 export const config = {
   api: {
-    bodyParser: false
-  }
+    bodyParser: false,
+  },
 };
 
 const supabase = createClient(
@@ -13,62 +15,76 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
-  // ✅ Handle browser GET safely
-  if (req.method === "GET") {
-    return res.status(200).json({
-      message: "Excel import API is live. Use POST to upload Excel file."
-    });
-  }
-
-  // ❌ Block all non-POST
+  // 🚫 Reject non-POST requests
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+    return res.status(405).json({
+      success: false,
+      message: "Use POST method",
+    });
   }
 
   try {
-    const buffers = [];
-    for await (const chunk of req) {
-      buffers.push(chunk);
-    }
-    const buffer = Buffer.concat(buffers);
+    const form = new formidable.IncomingForm();
 
-    const workbook = XLSX.read(buffer, { type: "buffer" });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet);
+    form.parse(req, async (err, fields, files) => {
+      if (err) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
 
-    if (!rows.length) {
-      return res.status(400).json({ error: "Excel file is empty" });
-    }
+      const file = files.file;
+      if (!file) {
+        return res.status(400).json({
+          success: false,
+          message: "Excel file is required",
+        });
+      }
 
-    const leads = rows.map((row) => ({
-      name: row.Name || null,
-      gender: row.Gender || null,
-      education: row.Education || null,
-      occupation: row.Occupation || null,
-      religion: row.Religion || null,
-      caste: row.Caste || null,
-      mobile: String(row.MobileNo || "").trim(),
-      star: row.Star || null,
-      jathakam_type: row["Type Of Jathakam"] || null,
-      source: "EXCEL",
-      status: "NEW"
-    }));
+      const workbook = xlsx.readFile(file.filepath);
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
 
-    const { error } = await supabase
-      .from("leads")
-      .insert(leads, { ignoreDuplicates: true });
+      const rows = xlsx.utils.sheet_to_json(sheet);
 
-    if (error) throw error;
+      if (rows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Excel file is empty",
+        });
+      }
 
-    return res.json({
-      success: true,
-      inserted: leads.length
+      // Insert into leads table
+      const { error } = await supabase.from("leads").insert(
+        rows.map((row) => ({
+          name: row.Name || null,
+          gender: row.Gender || null,
+          education: row.Education || null,
+          occupation: row.Occupation || null,
+          religion: row.Religion || null,
+          caste: row.Caste || null,
+          mobile_no: row.MobileNo || null,
+          star: row.Star || null,
+          jathakam_type: row["Type Of Jathakam"] || null,
+          source: "EXCEL_UPLOAD",
+          approved: false,
+        }))
+      );
+
+      if (error) {
+        return res.status(500).json({
+          success: false,
+          error: error.message,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        inserted: rows.length,
+      });
     });
-  } catch (err) {
-    console.error(err);
+  } catch (e) {
     return res.status(500).json({
       success: false,
-      error: err.message
+      error: e.message,
     });
   }
 }
