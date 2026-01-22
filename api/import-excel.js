@@ -1,13 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import XLSX from "xlsx";
 
-/**
- * POST /api/import-excel
- * Body: raw binary (.xlsx)
- */
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+    return res.status(405).json({ error: "POST only" });
   }
 
   try {
@@ -22,10 +18,16 @@ export default async function handler(req, res) {
 
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    // Read raw body
-    const buffers = [];
-    for await (const chunk of req) buffers.push(chunk);
-    const buffer = Buffer.concat(buffers);
+    // Read raw binary body
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+
+    if (!buffer.length) {
+      return res.status(400).json({ error: "Empty file" });
+    }
 
     // Parse Excel
     const workbook = XLSX.read(buffer, { type: "buffer" });
@@ -35,10 +37,10 @@ export default async function handler(req, res) {
     );
 
     if (!rows.length) {
-      return res.status(400).json({ error: "Excel file is empty" });
+      return res.status(400).json({ error: "Excel has no rows" });
     }
 
-    // INSERT INTO leads table (change table name if needed)
+    // Insert into leads table
     const { error } = await supabase
       .from("leads")
       .insert(rows);
